@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin - Absensi Digital Pucaksari</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: white; padding: 20px; }
+        .card { background: #333; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #444; }
+        th, td { border: 1px solid #555; padding: 10px; text-align: center; }
+        th { background: #2e7d32; }
+        input, select, button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; }
+        button { background: #4CAF50; color: white; border: none; cursor: pointer; font-weight: bold; }
+        .loading { color: yellow; font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <h2>ADMIN PANEL - PEMDES PUCAKSARI</h2>
+
+    <div class="card">
+        <h3>+ Tambah Data Perangkat (Scan Wajah)</h3>
+        <input type="text" id="regNama" placeholder="Nama Lengkap">
+        <input type="text" id="regJabatan" placeholder="Jabatan">
+        <p>Pilih foto wajah yang jelas untuk referensi:</p>
+        <input type="file" id="regFoto" accept="image/*">
+        <button id="btnSimpan" onclick="uploadPerangkat()">SIMPAN DATA PERANGKAT</button>
+        <p id="statusReg" class="loading"></p>
+    </div>
+
+    <div class="card">
+        <h3>Rekap Absensi Otomatis</h3>
+        <button onclick="muatRekap()" style="background: #2196F3;">REFRESH DATA REKAP</button>
+        <table id="tabelRekap">
+            <thead>
+                <tr>
+                    <th>Nama</th>
+                    <th>Jabatan</th>
+                    <th>Hadir</th>
+                    <th>Ijin</th>
+                    <th>Tugas Luar</th>
+                    <th>Tepat Waktu (Masuk)</th>
+                    <th>Terlambat</th>
+                </tr>
+            </thead>
+            <tbody id="isiRekap">
+                </tbody>
+        </table>
+    </div>
+
+    <script>
+        const API_URL = "URL_WEB_APP_APPS_SCRIPT_ANDA"; // Ganti dengan URL dari Deploy Google Apps Script
+
+        // 1. Inisialisasi Face-API
+        async function init() {
+            document.getElementById('statusReg').innerText = "Memuat model AI... Mohon tunggu.";
+            await faceapi.nets.ssdMobilenetv1.loadFromUri('https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights');
+            await faceapi.nets.faceLandmark68Net.loadFromUri('https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights');
+            await faceapi.nets.faceRecognitionNet.loadFromUri('https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights');
+            document.getElementById('statusReg').innerText = "Sistem Siap.";
+            muatRekap();
+        }
+
+        // 2. Fungsi Ekstrak Wajah & Simpan ke Sheets
+        async function uploadPerangkat() {
+            const nama = document.getElementById('regNama').value;
+            const jabatan = document.getElementById('regJabatan').value;
+            const file = document.getElementById('regFoto').files[0];
+
+            if(!nama || !file) return alert("Isi nama dan pilih foto!");
+
+            document.getElementById('statusReg').innerText = "Menganalisis wajah... jangan tutup halaman.";
+            
+            const img = await faceapi.bufferToImage(file);
+            const detection = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+
+            if (!detection) {
+                alert("Wajah tidak terdeteksi dalam foto! Gunakan foto yang lebih jelas.");
+                return;
+            }
+
+            // Convert descriptor (koordinat wajah) ke string untuk disimpan di spreadsheet
+            const descriptorStr = JSON.stringify(Array.from(detection.descriptor));
+
+            const payload = {
+                action: 'tambah_perangkat',
+                nama: nama,
+                jabatan: jabatan,
+                descriptor: descriptorStr
+            };
+
+            fetch(API_URL, {
+                method: "POST",
+                body: JSON.stringify(payload)
+            }).then(() => {
+                alert("Berhasil mendaftarkan " + nama);
+                location.reload();
+            });
+        }
+
+        // 3. Fungsi Ambil Data & Hitung Rekap
+        async function muatRekap() {
+            const res = await fetch(API_URL + "?p=data_all"); // Pastikan Apps Script menghandle query ini
+            const allData = await res.json(); 
+            // allData.perangkat = [nama, jab, desc]
+            // allData.absen = [nama, jab, status, waktu, jenis, ket]
+
+            const isiRekap = document.getElementById('isiRekap');
+            isiRekap.innerHTML = "";
+
+            allData.perangkat.shift(); // Hapus header tabel
+
+            allData.perangkat.forEach(p => {
+                const nama = p[0];
+                const jabatan = p[1];
+                
+                // Filter data absen milik orang ini
+                const logs = allData.absen.filter(a => a[0] === nama);
+                
+                const hadir = logs.filter(l => l[2] === "Hadir").length;
+                const ijin = logs.filter(l => l[2] === "Ijin").length;
+                const tugas = logs.filter(l => l[2] === "Tugas Luar").length;
+                const tepat = logs.filter(l => l[5] === "Tepat Waktu").length;
+                const telat = logs.filter(l => l[5] === "Terlambat").length;
+
+                isiRekap.innerHTML += `
+                    <tr>
+                        <td>${nama}</td>
+                        <td>${jabatan}</td>
+                        <td>${hadir}</td>
+                        <td>${ijin}</td>
+                        <td>${tugas}</td>
+                        <td>${tepat}</td>
+                        <td>${telat}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
